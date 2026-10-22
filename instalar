@@ -1,0 +1,96 @@
+#!/bin/bash
+# =============================================================================
+# SentryLink Local v2 — arranque del instalador, en una línea
+# =============================================================================
+#   curl -fsSL https://raw.githubusercontent.com/walc72/sentrylink-instalar/main/instalar | sudo bash
+#
+# Este archivo es PÚBLICO a propósito: es lo único que se baja sin token. El
+# instalador de verdad vive en walc72/sentrylink-local-v2, que es privado.
+# Hace tres cosas:
+#   1. pide un token de GitHub, sin eco, y no lo guarda en ningún lado;
+#   2. clona sentrylink-local-v2 en /root/sentrylink-instalador, en el último
+#      release (tag nubicom-AAAA.MM.N), o en el REF que se pida;
+#   3. lanza el instalador que corresponde: instalar-proxmox.sh en un host
+#      Proxmox, instalar-servidor.sh en un Debian o Ubuntu.
+#
+# Otro REF (una rama para probar, un tag viejo):
+#   curl -fsSL …/instalar | sudo bash -s -- --ref feat/instalar-servidor
+#
+# Todo va adentro de main(), que se llama en la última línea: si la descarga
+# se corta a mitad, bash no ejecuta un pedazo del script.
+# =============================================================================
+set -euo pipefail
+
+main() {
+  local repo="walc72/sentrylink-local-v2" dir="/root/sentrylink-instalador" ref="" t d head
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --ref) [ $# -ge 2 ] || die "--ref necesita un tag o una rama"; ref="$2"; shift ;;
+      *) die "argumento desconocido: $1 (el único es --ref)" ;;
+    esac
+    shift
+  done
+  [ "$(id -u)" = 0 ] || die "corré con sudo: curl -fsSL … | sudo bash"
+
+  if ! command -v git >/dev/null 2>&1; then
+    echo "Instalando git…"
+    { DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git ca-certificates; } \
+      || die "no pude instalar git"
+  fi
+
+  # El token: lo lee de la terminal aunque este script llegue por un pipe.
+  { set +x; } 2>/dev/null
+  { : </dev/tty; } 2>/dev/null || die "hace falta una terminal (el token se tipea)"
+  echo "Token de GitHub, fine-grained, de los DOS repos ($repo y walc72/puente-modbus-mqtt),"
+  echo "vencimiento de 1 día, permisos Contents: read y Administration: write"
+  echo "(Administration: write carga las deploy keys; también deja borrar el repo: que venza)."
+  echo "No se guarda."
+  read -r -s -p "Token: " t </dev/tty; echo
+  [[ "$t" =~ ^[A-Za-z0-9_]{20,255}$ ]] || die "eso no parece un token de GitHub"
+
+  # git le pide la contraseña a un askpass que la lee del descriptor 9: el
+  # token nunca va en un argumento, en el entorno ni en un archivo (como
+  # scripts/actualizar.sh). Un descriptor nuevo por cada comando de git.
+  d="$(mktemp -d)"; trap 'rm -rf "$d"' EXIT
+  # shellcheck disable=SC2016  # el $1 y el $t son del askpass
+  printf '#!/bin/sh\ncase "$1" in\n  Username*) echo x-access-token ;;\n  *) IFS= read -r t <&9 && printf "%%s\\n" "$t" ;;\nesac\n' >"$d/askpass"
+  chmod 700 "$d/askpass"
+  git_token() { GIT_ASKPASS="$d/askpass" GIT_TERMINAL_PROMPT=0 git -c credential.helper= "$@" 9< <(printf '%s\n' "$t"); }
+
+  local url="https://github.com/$repo.git"
+  if [ -z "$ref" ]; then
+    ref="$(git_token ls-remote --tags --refs "$url" 'nubicom-*' | awk '{ sub("refs/tags/", "", $2); print $2 }' \
+             | { grep -E '^nubicom-[0-9]{4}\.[0-9]{2}\.[0-9]+$' || true; } | sort -V | tail -1)" \
+      || die "no pude leer los tags de $repo (¿el token tiene Contents: read de los dos repos?)"
+    [ -n "$ref" ] || die "$repo no tiene ningún tag nubicom-AAAA.MM.N"
+    echo "Último release: $ref"
+  fi
+
+  if [ -d "$dir/.git" ]; then
+    [ -z "$(git -C "$dir" status --porcelain)" ] || die "$dir tiene cambios sin commitear: no lo toco"
+    git_token -C "$dir" fetch -q --tags origin "+refs/heads/*:refs/remotes/origin/*" || die "no pude actualizar $dir desde GitHub"
+  else
+    git_token clone -q "$url" "$dir" || die "no pude clonar $repo (¿el token tiene Contents: read?)"
+  fi
+  # Una rama se toma de origin; un tag, tal cual.
+  if git -C "$dir" rev-parse -q --verify "refs/remotes/origin/$ref" >/dev/null; then
+    git -C "$dir" checkout -q --detach "origin/$ref"
+  else
+    git -C "$dir" checkout -q --detach "$ref" 2>/dev/null || die "$repo no tiene $ref"
+  fi
+  head="$(git -C "$dir" rev-parse --short HEAD)"
+  echo "Instalador en $dir ($ref, $head)"
+
+  if command -v pveversion >/dev/null 2>&1; then
+    t=""
+    exec bash "$dir/instalar-proxmox.sh"
+  fi
+  [ -f "$dir/instalar-servidor.sh" ] || die "$ref no tiene instalar-servidor.sh (es anterior al instalador de Debian/Ubuntu)"
+  # El mismo token, para las deploy keys, por el descriptor 8: se tipea una vez.
+  rm -rf "$d"; trap - EXIT
+  exec bash "$dir/instalar-servidor.sh" --token-fd 8 8< <(printf '%s\n' "$t")
+}
+
+die() { echo "[ERR] $*" >&2; exit 1; }
+
+main "$@"
