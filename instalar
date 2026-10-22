@@ -2,7 +2,7 @@
 # =============================================================================
 # SentryLink Local v2 — arranque del instalador, en una línea
 # =============================================================================
-#   curl -fsSL https://raw.githubusercontent.com/walc72/sentrylink-instalar/main/instalar | sudo bash
+#   wget -qO- https://raw.githubusercontent.com/walc72/sentrylink-instalar/main/instalar | sudo bash
 #
 # Este archivo es PÚBLICO a propósito: es lo único que se baja sin token. El
 # instalador de verdad vive en walc72/sentrylink-local-v2, que es privado.
@@ -14,7 +14,7 @@
 #      Proxmox, instalar-servidor.sh en un Debian o Ubuntu.
 #
 # Otro REF (una rama para probar, un tag viejo):
-#   curl -fsSL …/instalar | sudo bash -s -- --ref feat/instalar-servidor
+#   wget -qO- …/instalar | sudo bash -s -- --ref feat/instalar-servidor
 #
 # Todo va adentro de main(), que se llama en la última línea: si la descarga
 # se corta a mitad, bash no ejecuta un pedazo del script.
@@ -30,7 +30,7 @@ main() {
     esac
     shift
   done
-  [ "$(id -u)" = 0 ] || die "corré con sudo: curl -fsSL … | sudo bash"
+  [ "$(id -u)" = 0 ] || die "corré como root (o con sudo): wget -qO- … | sudo bash"
 
   if ! command -v git >/dev/null 2>&1; then
     echo "Instalando git…"
