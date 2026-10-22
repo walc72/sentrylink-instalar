@@ -81,17 +81,19 @@ Se usa `wget` y no `curl` porque un Debian mínimo no trae `curl`.
 
 ## 2. Opciones del comando de una línea
 
-Las opciones van después de `bash -s --`.
+Las opciones van después de `bash -s --`. Si ya sos root, sin el `sudo`.
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/walc72/sentrylink-instalar/main/instalar | bash -s -- --respuestas /root/sentrylink-servidor.respuestas
+wget -qO- https://raw.githubusercontent.com/walc72/sentrylink-instalar/main/instalar | sudo bash -s -- --respuestas /root/sentrylink-servidor.respuestas
 ```
-Repite la instalación **sin preguntas**, con las respuestas de la corrida
-anterior. Sirve para retomar después de un corte o de un reinicio: lo que ya
-está hecho se saltea. Todo lo que no sea `--ref` pasa tal cual al instalador.
+Repite la instalación **sin las preguntas de la obra**, con las respuestas de
+la corrida anterior (el token y la actualización del sistema se siguen
+preguntando). Sirve para retomar después de un corte o de un reinicio: lo que
+quedó completo se verifica y se saltea, lo que quedó a medias se rehace. Todo
+lo que no sea `--ref` pasa tal cual al instalador.
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/walc72/sentrylink-instalar/main/instalar | bash -s -- --ref <TAG_O_RAMA>
+wget -qO- https://raw.githubusercontent.com/walc72/sentrylink-instalar/main/instalar | sudo bash -s -- --ref <TAG_O_RAMA>
 ```
 Instala otro release o una rama (para probar algo que todavía no tiene tag).
 **Nunca una rama en una obra:** solo tags.
@@ -112,13 +114,18 @@ Pregunta todo (la obra) e instala.
 ```bash
 bash /root/sentrylink-instalador/instalar-servidor.sh --respuestas /root/sentrylink-servidor.respuestas
 ```
-Sin preguntas, con las respuestas guardadas. Retoma donde quedó.
+Sin las preguntas de la obra, con las respuestas guardadas. Retoma donde quedó.
 
-```bash
-bash /root/sentrylink-instalador/instalar-servidor.sh --token-fd 8 8< <(printf '%s\n' "$TOKEN")
-```
-Recibe el token de GitHub por el descriptor 8 (lo usa el arranque para no
-pedirlo dos veces). A mano no hace falta: sin esta opción lo pregunta.
+`--token-fd N` es solo para el arranque: le pasa el token por un descriptor
+para no pedirlo dos veces. A mano no se usa: sin esa opción, el instalador
+pregunta el token si hace falta.
+
+Lo que **nunca** hace, y frena antes de tocar nada:
+- en una máquina que ya tiene SentryLink instalado de otra forma (a mano, o
+  adentro de un CT de `instalar-proxmox.sh`);
+- en una máquina cuyo puente ya lee un PLC real;
+- pasar a otro release una instalación que ya terminó (eso es actualizar,
+  otro paso).
 
 ```bash
 bash /root/sentrylink-instalador/instalar-servidor.sh --help
@@ -153,7 +160,9 @@ Sube a la versión siguiente de Ubuntu (repetir hasta 26.04 LTS).
 
 ## 4. Instalador en Proxmox: `instalar-proxmox.sh`
 
-Corre en el **host** Proxmox y crea un CT por obra.
+Corre en el **host** Proxmox y crea un CT por obra. Lanzado por el comando de
+una línea, pide el token **de nuevo** para las deploy keys (todavía no lo
+recibe del arranque).
 
 ```bash
 bash /root/sentrylink-instalador/instalar-proxmox.sh
@@ -200,18 +209,15 @@ Lo inverso: pone primero el cinturón y vuelve al simulador. Pide "sí".
 bash /root/sentrylink-instalador/instalar-proxmox.sh --actualizar <CTID>
 ```
 Lleva el CT al último release (respaldo antes si hay migraciones). Retomable.
-Pide "sí".
+Pide "sí". Para ver los releases nuevos pide un token de GitHub de **solo
+lectura** (Contents: read de `sentrylink-local-v2`); con ENTER usa los tags
+que ya tiene el clon del host. No hace falta traerlos a mano: el clon es
+privado y un `git fetch` sin token pide usuario y contraseña.
 
 ```bash
 bash /root/sentrylink-instalador/instalar-proxmox.sh --actualizar <CTID> <TAG>
 ```
 Lo mismo, a un release puntual.
-
-```bash
-git -C /root/sentrylink-instalador fetch --tags
-```
-Trae al clon del host los tags nuevos (sin esto, `--actualizar` no ve el
-último release).
 
 ---
 
@@ -235,8 +241,12 @@ nada más.
 ```bash
 cd /opt/genmonitor && ./instalar.sh --respuestas instalar.respuestas --unico-servidor
 ```
-Sin preguntas, contra el PLC real: confirmás que **ningún otro servidor**
-SentryLink lee ese PLC.
+Solo para pruebas y para la CI: acepta respuestas con `PLC_DESTINO=plc`
+confirmando que ningún otro servidor lee ese PLC. **No lleva el servidor al
+PLC real:** solo escribe la configuración de SentryLink; el puente sigue en el
+simulador y con el cinturón. Al PLC real se pasa con
+`instalar-proxmox.sh --plc-real` (en Debian/Ubuntu todavía no existe), que
+tiene las barreras.
 
 ```bash
 cd /opt/genmonitor && ./instalar.sh --simular
@@ -331,7 +341,13 @@ mando en uso.
 ```bash
 cd /opt/genmonitor && bash scripts/cert-mailpit.sh
 ```
-Genera el certificado TLS de Mailpit (el correo de prueba).
+Genera el certificado TLS de Mailpit (el correo de prueba). Si lo generó de
+nuevo, hay que recrear Mailpit y el authservice para que lo tomen (corta el
+portal unos segundos):
+
+```bash
+cd /opt/genmonitor && docker compose -f docker-compose.local.yml --env-file .env.local up -d --force-recreate --no-deps mailpit authservice
+```
 
 ---
 
@@ -354,7 +370,9 @@ Estado de las cuatro.
 ```bash
 systemctl is-active puente-modbus-mqtt servicio-comandos simulador-plc sentrylink-cinturon
 ```
-Lo mismo, una palabra por unidad: tienen que decir `active`.
+Lo mismo, una palabra por unidad. **Contra el simulador**, las cuatro dicen
+`active`. **En el PLC real** (después de `--plc-real`) solo el puente y
+servicio-comandos: el simulador queda apagado y el cinturón, sacado.
 
 ```bash
 journalctl -u puente-modbus-mqtt -f
@@ -384,7 +402,8 @@ Reinicia el puente (por ejemplo, después de cambiar su yaml).
 ```bash
 nft list table inet sentrylink_cinturon
 ```
-Muestra el cinturón: la IP del PLC que está bloqueada.
+Muestra el cinturón: la IP del PLC que está bloqueada. En el PLC real da
+error, porque el cinturón no está (es lo esperado).
 
 **Nunca `systemctl restart sentrylink-cinturon`:** el puente y
 servicio-comandos dependen de él y se reiniciarían con él.
@@ -454,8 +473,17 @@ docker exec gmlocal_postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -
 ```
 Versión de TimescaleDB de la base.
 
-**Copia en un NAS (NFS o SMB).** Se monta en el servidor y se declara en
-`.env.local`:
+**Copia en un NAS (NFS o SMB), en Debian/Ubuntu.** Se monta en el servidor y
+se declara en `.env.local`.
+
+- **En Proxmox, esto no:** el instalador ya monta la carpeta del host en el
+  CT (`CARPETA_RESPALDOS` en sus respuestas) y escribe `RESPALDO_DESTINO`.
+  Montar un NAS adentro del CT falla (CT sin privilegios) o pisa lo que dejó
+  el instalador.
+- **La línea de `/etc/fstab`** lleva opciones que importan: `soft` (si no, la
+  copia se cuelga cuando el NAS no contesta), `x-systemd.before=docker.service`
+  y permiso de escritura para el uid 70 del servicio. Copiala de
+  `docs/operacion/respaldos.md`, sección 2.1, del repo `sentrylink-local-v2`.
 
 ```bash
 mkdir -p /mnt/respaldos-nas && mount /mnt/respaldos-nas && findmnt /mnt/respaldos-nas
@@ -492,6 +520,7 @@ el mando en uso.
 ```bash
 wget -qO- http://127.0.0.1/health
 ```
+(Si en `.env.local` hay un `HTTP_PORT`, va ese puerto: `http://127.0.0.1:<HTTP_PORT>/health`.)
 El portal contesta: `{"status":"ok",…}`.
 
 ```bash
