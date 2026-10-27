@@ -7,14 +7,15 @@ Leé [`instalar`](instalar) antes de correrlo: es corto.
 
 - [1. Instalar](#1-instalar)
 - [2. Opciones del comando de una línea](#2-opciones-del-comando-de-una-línea)
-- [3. Instalador en Debian / Ubuntu: `instalar-servidor.sh`](#3-instalador-en-debian--ubuntu-instalar-servidorsh)
-- [4. Instalador en Proxmox: `instalar-proxmox.sh`](#4-instalador-en-proxmox-instalar-proxmoxsh)
-- [5. Configuración de la obra: `instalar.sh`](#5-configuración-de-la-obra-instalarsh)
-- [6. El stack: `init.sh` y Docker](#6-el-stack-initsh-y-docker)
-- [7. El puente, servicio-comandos y el simulador](#7-el-puente-servicio-comandos-y-el-simulador)
-- [8. Usuarios y tablero](#8-usuarios-y-tablero)
-- [9. Respaldos](#9-respaldos)
-- [10. Diagnóstico](#10-diagnóstico)
+- [3. De la instalación a la obra configurada](#3-de-la-instalación-a-la-obra-configurada)
+- [4. Instalador en Debian / Ubuntu: `instalar-servidor.sh`](#4-instalador-en-debian--ubuntu-instalar-servidorsh)
+- [5. Instalador en Proxmox: `instalar-proxmox.sh`](#5-instalador-en-proxmox-instalar-proxmoxsh)
+- [6. Configuración de la obra: `instalar.sh`](#6-configuración-de-la-obra-instalarsh)
+- [7. El stack: `init.sh` y Docker](#7-el-stack-initsh-y-docker)
+- [8. El puente, servicio-comandos y el simulador](#8-el-puente-servicio-comandos-y-el-simulador)
+- [9. Usuarios y tablero](#9-usuarios-y-tablero)
+- [10. Respaldos](#10-respaldos)
+- [11. Diagnóstico](#11-diagnóstico)
 - [Reglas que no se negocian](#reglas-que-no-se-negocian)
 
 Todos los comandos se corren **como root**. Los que dicen `cd /opt/genmonitor`
@@ -100,7 +101,86 @@ Instala otro release o una rama (para probar algo que todavía no tiene tag).
 
 ---
 
-## 3. Instalador en Debian / Ubuntu: `instalar-servidor.sh`
+## 3. De la instalación a la obra configurada
+
+El instalador deja el servidor **sin configurar**: contra el simulador, con una
+regla de red (el "cinturón") que le impide salir al PLC. La obra se configura
+**desde el portal**, no desde la consola. El porqué: así la configuración se
+revisa antes de aplicarse y se puede cambiar después sin tocar el servidor.
+
+1. **Instalar** con el comando de la sección 1. Sin `--respuestas`, pregunta
+   solo lo del servidor (y en Proxmox, lo del CT), no los datos del tablero.
+2. **Anotar el código.** Lo último que muestra el instalador es la dirección del
+   portal y un código de un solo uso:
+
+   ```
+   Abrí http://<IP-DEL-SERVIDOR> y usá este código: XXXX-XXXX-XXXX (vence en 24 h)
+   ```
+
+   Se muestra **una sola vez** y no queda en ningún archivo. Vence a las 24 h.
+3. **Entrar al portal** con esa dirección. Mientras no haya superadmin, el
+   inicio de sesión lleva solo al asistente (o es la ruta `/asistente`).
+4. **Recorrer el asistente**, de 6 pasos. Cada "Siguiente" guarda lo cargado:
+   si se cierra el navegador, se sigue donde se dejó.
+
+   | Paso | Qué se carga |
+   |---|---|
+   | 1. Superadmin | El código, un usuario, un correo y la contraseña. |
+   | 2. Obra | Sitio, cliente y nombre del tablero. |
+   | 3. Generadores | Gateway de G-1 y de G-2. El de **G-3 es opcional**. |
+   | 4. PLC | IP y unit ID Modbus del PLC (ejemplo: `192.0.2.10`, unit `1`). |
+   | 5. Órdenes habilitadas | Lo que se podrá mandar desde el portal. Todo apagado de entrada. |
+   | 6. Resumen | Lo cargado, para mirar antes de seguir. |
+
+5. **Revisar y Aplicar.** En el paso 6, "Revisar" deja un pedido que muestra
+   qué cambia sin escribir nada. Con el pedido revisado, "Aplicar" escribe la
+   configuración. Al terminar, la obra queda **configurada y en simulador**.
+   El asistente nunca toca el PLC real.
+
+### Después: Admin → Obra
+
+Es la pantalla del **superadmin** para todo lo que sigue. La franja de arriba
+dice el destino (Simulador o PLC real) y si el aplicador (el servicio que
+aplica los pedidos) está vivo.
+
+- **Probar lectura:** lee el PLC una vez (solo lectura) y muestra qué ve. No
+  cambia nada.
+- **Pasar al PLC real:** pide escribir de nuevo la IP del PLC y confirmar que
+  ningún otro servidor lo está usando. "Revisar" muestra cada barrera con ✔ o
+  ✗ (selector en LOCAL, MANUAL remoto en 0, mando deshabilitado, otro servidor
+  que no esté escribiendo en ese PLC). "Aplicar" pide la contraseña del
+  superadmin, y si algo falla vuelve solo al simulador. **Nunca escribe en el
+  PLC.**
+- **Cambiar una obra ya hecha:** se editan los campos y se pasa por Revisar →
+  Aplicar. Lo que toca el PLC pide la contraseña.
+- **Volver al simulador:** el mismo camino a la inversa.
+
+### El comando `sentrylink`
+
+Dos comandos de consola, para cuando el portal no alcanza. Se corren como root
+en el servidor (en Proxmox, adentro del CT: `pct enter <CTID>`).
+
+```bash
+sentrylink codigo-inicial
+```
+Genera un código nuevo si se perdió el anterior o venció. Reemplaza al
+anterior y saca el bloqueo por intentos fallidos. **Solo corre mientras no haya
+superadmin:** con uno creado se niega (ver `restablecer-superadmin.sh`, en la
+sección 9).
+
+```bash
+sentrylink volver-simulador
+```
+La salida de emergencia, sin portal: pide escribir `si`, cancela el pedido
+abierto (si hay) y vuelve la obra al simulador, con las mismas barreras. Anda
+aunque la base de datos esté caída. En un servidor con la configuración armada
+a mano (todavía no "adoptado" desde Admin → Obra) se niega y no toca nada: ahí
+la vuelta se hace desde el host Proxmox, con
+`instalar-proxmox.sh --volver-simulador <CTID>`.
+
+---
+
+## 4. Instalador en Debian / Ubuntu: `instalar-servidor.sh`
 
 Instala todo en la máquina misma, sin CT: Docker, deploy keys, SentryLink en
 `/opt/genmonitor`, el puente con su cinturón y el simulador, y la verificación.
@@ -109,12 +189,14 @@ Lo lanza el comando de una línea; también se puede correr directo:
 ```bash
 bash /root/sentrylink-instalador/instalar-servidor.sh
 ```
-Pregunta todo (la obra) e instala.
+Pregunta solo el dominio, instala y deja la obra sin configurar (sección 3).
 
 ```bash
 bash /root/sentrylink-instalador/instalar-servidor.sh --respuestas /root/sentrylink-servidor.respuestas
 ```
-Sin las preguntas de la obra, con las respuestas guardadas. Retoma donde quedó.
+Sin preguntas, con las respuestas guardadas. Retoma donde quedó. Si el archivo
+trae la obra completa, la deja configurada sin asistente (pruebas y
+reinstalaciones); el superadmin igual se crea con el código.
 
 `--token-fd N` es solo para el arranque: le pasa el token por un descriptor
 para no pedirlo dos veces. A mano no se usa: sin esa opción, el instalador
@@ -152,13 +234,13 @@ sudo do-release-upgrade
 ```
 Sube a la versión siguiente de Ubuntu (repetir hasta 26.04 LTS).
 
-**Esta versión todavía no tiene** el paso al PLC real, Caddy con dominio ni
-`--actualizar`: queda siempre contra el simulador. Eso hoy está solo en
+Queda siempre contra el simulador. El paso al PLC real se hace desde el portal
+(Admin → Obra, sección 3). Caddy con dominio y `--actualizar` están solo en
 `instalar-proxmox.sh`.
 
 ---
 
-## 4. Instalador en Proxmox: `instalar-proxmox.sh`
+## 5. Instalador en Proxmox: `instalar-proxmox.sh`
 
 Corre en el **host** Proxmox y crea un CT por obra. Lanzado por el comando de
 una línea, pide el token **de nuevo** para las deploy keys (todavía no lo
@@ -167,8 +249,9 @@ recibe del arranque).
 ```bash
 bash /root/sentrylink-instalador/instalar-proxmox.sh
 ```
-Pregunta el CT (ID, IP, disco, memoria, carpeta de respaldos) y la obra; crea
-el CT e instala todo adentro, contra el simulador.
+Pregunta el CT (ID, IP, disco, memoria, carpeta de respaldos) y el dominio;
+crea el CT e instala todo adentro, contra el simulador y sin configurar la obra
+(sección 3).
 
 ```bash
 bash /root/sentrylink-instalador/instalar-proxmox.sh --respuestas /root/sentrylink-<CTID>.respuestas
@@ -195,7 +278,8 @@ de las obras. Pide "sí".
 ```bash
 bash /root/sentrylink-instalador/instalar-proxmox.sh --plc-real <CTID>
 ```
-Pasa el CT del simulador al PLC real de la obra, con sus barreras: que ningún
+Pasa el CT del simulador al PLC real de la obra (el camino normal es el
+portal, sección 3; este es el del host), con sus barreras: que ningún
 otro servidor esté conectado al PLC, la IP escrita de nuevo, y una lectura
 Modbus (solo lectura) que confirma el selector en LOCAL y MANUAL remoto en 0.
 Pide "sí". **Nunca escribe en el PLC.**
@@ -221,7 +305,7 @@ Lo mismo, a un release puntual.
 
 ---
 
-## 5. Configuración de la obra: `instalar.sh`
+## 6. Configuración de la obra: `instalar.sh`
 
 Lo llaman los dos instaladores. Escribe el usuario MQTT de servicio-comandos,
 la ACL, el tablero, el cliente y los generadores, y llama a `init.sh`. Las
@@ -269,7 +353,7 @@ unos segundos).
 
 ---
 
-## 6. El stack: `init.sh` y Docker
+## 7. El stack: `init.sh` y Docker
 
 El stack (portal, authservice, Postgres, Mosquitto, Mailpit, respaldos) corre
 con Docker Compose en `/opt/genmonitor`. **Siempre con `--env-file .env.local`:**
@@ -351,7 +435,7 @@ cd /opt/genmonitor && docker compose -f docker-compose.local.yml --env-file .env
 
 ---
 
-## 7. El puente, servicio-comandos y el simulador
+## 8. El puente, servicio-comandos y el simulador
 
 Son servicios de systemd, fuera de Docker:
 
@@ -415,14 +499,15 @@ Archivos de configuración:
 
 ---
 
-## 8. Usuarios y tablero
+## 9. Usuarios y tablero
 
 ```bash
 cd /opt/genmonitor && ./restablecer-superadmin.sh
 ```
 Pone una contraseña nueva al superadmin `admin` (se pide dos veces por
-teclado; no queda en el historial). Para cuando se perdió la que mostró la
-instalación.
+teclado; no queda en el historial). Para cuando se perdió la
+contraseña del superadmin. Si lo que se perdió es el código del asistente y
+todavía no hay superadmin, es `sentrylink codigo-inicial`.
 
 ```bash
 cd /opt/genmonitor && ./restablecer-superadmin.sh --usuario <USUARIO>
@@ -447,7 +532,7 @@ Muestra si el mando remoto está habilitado en cada tablero.
 
 ---
 
-## 9. Respaldos
+## 10. Respaldos
 
 El contenedor `gmlocal_respaldos` hace los respaldos programados; desde el
 portal (Admin → Respaldos) se pide uno en el momento y se descarga. Quedan en
@@ -515,7 +600,7 @@ el mando en uso.
 
 ---
 
-## 10. Diagnóstico
+## 11. Diagnóstico
 
 ```bash
 wget -qO- http://127.0.0.1/health
