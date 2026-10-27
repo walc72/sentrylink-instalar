@@ -172,10 +172,15 @@ sección 9).
 sentrylink volver-simulador
 ```
 La salida de emergencia, sin portal: pide escribir `si`, cancela el pedido
-abierto (si hay) y vuelve la obra al simulador, con las mismas barreras. Anda
-aunque la base de datos esté caída. En un servidor con la configuración armada
-a mano (todavía no "adoptado" desde Admin → Obra) se niega y no toca nada: ahí
-la vuelta se hace desde el host Proxmox, con
+abierto (si hay) y vuelve la obra al simulador, con las mismas barreras (sin
+base, todas las barreras menos la del mando: la habilitación vive en la base).
+Anda aunque la base de datos esté caída o el servicio del aplicador esté
+detenido. En un servidor con la configuración armada a mano (todavía no
+"adoptado" desde Admin → Obra) se niega y no toca nada: no hay vuelta
+automática al simulador. Para cortar el mando desde el portal: selector del
+tablero en LOCAL, MANUAL remoto (b6) en 0 y mando deshabilitado; recién ahí
+se puede detener servicio-comandos. Si ese servidor lo creó
+`instalar-proxmox.sh`, la vuelta también se puede hacer desde el host, con
 `instalar-proxmox.sh --volver-simulador <CTID>`.
 
 ---
@@ -196,7 +201,9 @@ bash /root/sentrylink-instalador/instalar-servidor.sh --respuestas /root/sentryl
 ```
 Sin preguntas, con las respuestas guardadas. Retoma donde quedó. Si el archivo
 trae la obra completa, la deja configurada sin asistente (pruebas y
-reinstalaciones); el superadmin igual se crea con el código.
+reinstalaciones); el superadmin igual se crea con el código. Desde ahí la obra
+se cambia en el portal (Admin → Obra): una corrida repetida no la pisa con lo
+del archivo.
 
 `--token-fd N` es solo para el arranque: le pasa el token por un descriptor
 para no pedirlo dos veces. A mano no se usa: sin esa opción, el instalador
@@ -256,7 +263,9 @@ crea el CT e instala todo adentro, contra el simulador y sin configurar la obra
 ```bash
 bash /root/sentrylink-instalador/instalar-proxmox.sh --respuestas /root/sentrylink-<CTID>.respuestas
 ```
-Sin preguntas, con las respuestas de una corrida anterior. Retoma.
+Sin preguntas, con las respuestas de una corrida anterior. Retoma. Lo de la
+obra de un CT ya instalado se cambia en el portal (Admin → Obra): la corrida
+repetida y `--actualizar` usan lo del CT, no lo del archivo del host.
 
 ```bash
 bash /root/sentrylink-instalador/instalar-proxmox.sh --simular --respuestas /root/sentrylink-<CTID>.respuestas
@@ -502,17 +511,14 @@ Archivos de configuración:
 ## 9. Usuarios y tablero
 
 ```bash
-cd /opt/genmonitor && ./restablecer-superadmin.sh
-```
-Pone una contraseña nueva al superadmin `admin` (se pide dos veces por
-teclado; no queda en el historial). Para cuando se perdió la
-contraseña del superadmin. Si lo que se perdió es el código del asistente y
-todavía no hay superadmin, es `sentrylink codigo-inicial`.
-
-```bash
 cd /opt/genmonitor && ./restablecer-superadmin.sh --usuario <USUARIO>
 ```
-Lo mismo, para otro usuario.
+Pone una contraseña nueva al superadmin `<USUARIO>`, el que se creó en el
+asistente (se pide dos veces por teclado; no queda en el historial). Para
+cuando se perdió la contraseña del superadmin. Sin `--usuario` cambia la de
+`admin`, que solo existe en instalaciones de antes del asistente. Si lo que se
+perdió es el código del asistente y todavía no hay superadmin, es
+`sentrylink codigo-inicial`.
 
 ```bash
 cd /opt/genmonitor && ./sembrar-tablero.sh --respuestas instalar.respuestas
